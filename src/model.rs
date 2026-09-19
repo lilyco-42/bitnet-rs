@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::gguf::{GgufFile, GgufValue};
+use crate::gguf::GgufFile;
 use crate::tokenizer::BpeTokenizer;
 use crate::{I2Tensor, QK_I2_S, linear_row_q, quantize_i8_blocks};
 
@@ -315,7 +315,7 @@ impl Model {
         let mut layers = Vec::with_capacity(n_layer);
         for i in 0..n_layer {
             let p = format!("blk.{i}.");
-            let norm = |name: String| -> Result<Vec<f32>, ModelError> {
+            let mut norm = |name: String| -> Result<Vec<f32>, ModelError> {
                 match load_tensor(&mut g, &name)? {
                     TensorData::F32(v) => Ok(v),
                     _ => Err(ModelError::Format(format!("{name} 不是 f32"))),
