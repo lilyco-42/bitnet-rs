@@ -39,15 +39,36 @@ g++ -O2 -o reference/bitnet_ref reference/bitnet_ref.cpp   # C++ 参考（原版
 
 覆盖：打包字节、scale、整数点积（常规 + 尾部块 + i16 wrap 极端情况）。
 
+## 作为库使用（lib API）
+
+模型加载 / KV cache / 前向 / 采样已提升进 lib（`bitnet_rs::model`），下游可
+直接依赖本 crate 做本地推理，无需起子进程：
+
+```rust,ignore
+use bitnet_rs::model::Model;
+
+let model = Model::load(std::path::Path::new("models/ggml-model-i2_s.gguf"))?;
+let gen = model.generate("你好，介绍一下你自己", 256, 0.0)?; // temp=0 贪心解码
+println!("{}", gen.text);           // 生成文本
+println!("{} tok", gen.gen_tokens); // 实际生成 token 数（≤ max_tokens）
+```
+
+低层 API（聊天等需要跨轮保留 KV cache 的场景）：
+
+- `Model::encode / decode` — BPE 分词（自动加 BOS）
+- `KVCache::new(&model)` + `forward_token(&model, &mut kv, token)` — 单 token 前向
+- `sample_token(&logits, temp)` — 贪心 / 温度采样
+
 ## 架构
 
 ```
 src/
 ├── lib.rs        # quantize_i2_s / vec_dot（NEON+标量）/ 并行 matvec
+├── model.rs      # Model 加载 / KVCache / forward_token / generate（lib 推理 API）
 ├── gguf.rs       # GGUF v3 解析（32 字节数据区对齐）
 ├── tokenizer.rs  # llama3 BPE（llama.cpp 字节表）
 └── bin/
-    ├── infer.rs  # 推理 + 聊天
+    ├── infer.rs  # 推理 + 聊天（lib API 的 CLI 外壳）
     ├── compare.rs # 对拍工具
     └── dump.rs   # GGUF 元数据查看
 ```

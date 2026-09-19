@@ -7,7 +7,6 @@
 //!
 //! 参考实现（标量，可读优先）。no_std(alloc) 兼容。
 
-
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::needless_range_loop)]
 #![allow(unused_imports)]
@@ -104,7 +103,11 @@ pub fn quantize_i2_s(src: &[f32]) -> I2Tensor {
         }
     }
 
-    I2Tensor { packed, scales: alloc::vec![scale; n / QK_I2_S], n }
+    I2Tensor {
+        packed,
+        scales: alloc::vec![scale; n / QK_I2_S],
+        n,
+    }
 }
 
 /// 激活量化：f32 → i8（对称，scale = max/127）
@@ -151,11 +154,7 @@ pub fn quantize_i8_blocks(x: &[f32]) -> (Vec<i8>, Vec<f32>) {
 #[inline]
 fn round_f32(v: f32) -> f32 {
     let f = libm::floorf(v);
-    if v - f >= 0.5 {
-        f + 1.0
-    } else {
-        f
-    }
+    if v - f >= 0.5 { f + 1.0 } else { f }
 }
 
 /// 整数点积：打包权重 × i8 激活（与 C++ `ggml_vec_dot_i2_i8_s_1x1` NEON 分支一致）
@@ -164,8 +163,8 @@ fn round_f32(v: f32) -> f32 {
 /// i16 wrap 分 lane 模拟，任何输入下输出都与 C++ 逐位一致。
 pub fn vec_dot_i2_i8_s_1x1(
     n: usize,
-    x_row: &[u8],          // 打包权重行（bx 步长语义：行内连续）
-    y: &[i8],              // 激活
+    x_row: &[u8], // 打包权重行（bx 步长语义：行内连续）
+    y: &[i8],     // 激活
     nrc: usize,
 ) -> Vec<f32> {
     let nb = n / QK_I2_S;
@@ -189,7 +188,8 @@ pub fn vec_dot_i2_i8_s_1x1(
                         let code = (xb[t] >> (6 - 2 * g)) & 0b11;
                         // vmlal 的 lane 划分：low 半（t<8）→ lane 0..3，high 半 → lane 4..7
                         let lane = t % 8;
-                        accu32[lane] = accu32[lane].wrapping_add(code as i16 * y[y_base + t] as i16);
+                        accu32[lane] =
+                            accu32[lane].wrapping_add(code as i16 * y[y_base + t] as i16);
                     }
                 }
             }
@@ -203,13 +203,15 @@ pub fn vec_dot_i2_i8_s_1x1(
         if la_num > 0 {
             let mut accula: [i16; 8] = [0; 8];
             for j in 0..la_num {
-                let xb = &x_row[x_off + group32_num * 512 + j * 16..x_off + group32_num * 512 + j * 16 + 16];
+                let xb = &x_row
+                    [x_off + group32_num * 512 + j * 16..x_off + group32_num * 512 + j * 16 + 16];
                 for g in 0..4 {
                     let y_base = group32_num * 2048 + j * 64 + g * 16;
                     for t in 0..16 {
                         let code = (xb[t] >> (6 - 2 * g)) & 0b11;
                         let lane = t % 8;
-                        accula[lane] = accula[lane].wrapping_add(code as i16 * y[y_base + t] as i16);
+                        accula[lane] =
+                            accula[lane].wrapping_add(code as i16 * y[y_base + t] as i16);
                     }
                 }
             }
@@ -315,7 +317,10 @@ pub fn linear_row(w: &I2Tensor, row: usize, k: usize, x: &[f32]) -> f32 {
 pub fn i2_matvec_parallel(w: &I2Tensor, k: usize, x: &[f32]) -> Vec<f32> {
     let n_rows = w.n / k;
     let (y, act_scales) = quantize_i8_blocks(x);
-    let n_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(n_rows);
+    let n_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(n_rows);
     let chunk = n_rows.div_ceil(n_threads);
     std::thread::scope(|s| {
         let mut handles = Vec::with_capacity(n_threads);
@@ -327,7 +332,9 @@ pub fn i2_matvec_parallel(w: &I2Tensor, k: usize, x: &[f32]) -> Vec<f32> {
             }
             let (w, y, act_scales) = (w, &y[..], &act_scales[..]);
             handles.push(s.spawn(move || {
-                (start..end).map(|r| linear_row_q(w, r, k, y, act_scales)).collect::<Vec<f32>>()
+                (start..end)
+                    .map(|r| linear_row_q(w, r, k, y, act_scales))
+                    .collect::<Vec<f32>>()
             }));
         }
         let mut out = alloc::vec![0f32; n_rows];
@@ -347,5 +354,7 @@ pub fn row_bytes(w: &I2Tensor, row: usize, k: usize) -> &[u8] {
 }
 #[cfg(feature = "std")]
 pub mod gguf;
+#[cfg(feature = "std")]
+pub mod model;
 #[cfg(feature = "std")]
 pub mod tokenizer;

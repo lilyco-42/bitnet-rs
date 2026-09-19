@@ -118,7 +118,12 @@ fn read_value<R: Read>(r: &mut R, t: u32) -> std::io::Result<GgufValue> {
         10 => GgufValue::U64(r.read_u64::<LittleEndian>()?),
         11 => GgufValue::I64(r.read_i64::<LittleEndian>()?),
         12 => GgufValue::F64(r.read_f64::<LittleEndian>()?),
-        _ => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("unknown gguf type {t}"))),
+        _ => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unknown gguf type {t}"),
+            ));
+        }
     })
 }
 
@@ -127,7 +132,10 @@ impl GgufFile {
         let mut f = std::fs::File::open(path)?;
         let magic = f.read_u32::<LittleEndian>()?;
         if magic != MAGIC {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "not a GGUF file"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "not a GGUF file",
+            ));
         }
         let _version = f.read_u32::<LittleEndian>()?;
         let n_tensors = f.read_u64::<LittleEndian>()?;
@@ -151,12 +159,23 @@ impl GgufFile {
             }
             let ggml_type = f.read_u32::<LittleEndian>()?;
             let offset = f.read_u64::<LittleEndian>()?;
-            tensors.push(GgufTensorInfo { name, n_dims, dims, ggml_type, offset });
+            tensors.push(GgufTensorInfo {
+                name,
+                n_dims,
+                dims,
+                ggml_type,
+                offset,
+            });
         }
         let pos = f.stream_position()?;
         // ggml 张量数据区 32 字节对齐（header 尾部有 padding）
         let data_offset = (pos + 31) / 32 * 32;
-        Ok(GgufFile { file: f, kv, tensors, data_offset })
+        Ok(GgufFile {
+            file: f,
+            kv,
+            tensors,
+            data_offset,
+        })
     }
 
     pub fn get(&self, key: &str) -> Option<&GgufValue> {
@@ -165,7 +184,8 @@ impl GgufFile {
 
     /// 张量数据读取（I2_S / F32 / BF16 / F16 / Q4_0 等按需）
     pub fn read_tensor_data(&mut self, t: &GgufTensorInfo, buf: &mut [u8]) -> std::io::Result<()> {
-        self.file.seek(SeekFrom::Start(self.data_offset + t.offset))?;
+        self.file
+            .seek(SeekFrom::Start(self.data_offset + t.offset))?;
         self.file.read_exact(buf)
     }
 
@@ -173,7 +193,7 @@ impl GgufFile {
         let ne: u64 = t.dims.iter().product();
         match t.ggml_type {
             // 与 llama.cpp ggml_type_size 一致
-            0 | 1 | 2 => ne * 4,                 // F32 / F16 / BF16（size 4/2/2 分开处理）
+            0 | 1 | 2 => ne * 4, // F32 / F16 / BF16（size 4/2/2 分开处理）
             _ => {
                 // QK=64 的量化类型按块大小计算
                 let (blk, per_blk) = type_block_size(t.ggml_type);
@@ -190,20 +210,20 @@ impl GgufFile {
 /// ggml_type 的块大小：返回 (block 字节数, 每块元素数)
 pub fn type_block_size(t: u32) -> (u64, u64) {
     match t {
-        0 => (4, 1),                              // F32
-        1 => (2, 1),                              // F16
-        2 => (2, 1),                              // BF16
-        7 => (4 + 1, 4),                          // Q4_0 (block_q4_0)
-        8 => (4 + 2, 8),                          // Q4_1
-        32 => (4 + 1, 4),                         // IQ4_NL? 忽略
-        34 => (4 + 1, 4),                         // Q4_K? 忽略
-        40 => (8, 1),                             // I8
-        41 => (4, 1),                             // I16
-        42 => (8, 1),                             // I32
-        43 => (4, 1),                             // I64
+        0 => (4, 1),      // F32
+        1 => (2, 1),      // F16
+        2 => (2, 1),      // BF16
+        7 => (4 + 1, 4),  // Q4_0 (block_q4_0)
+        8 => (4 + 2, 8),  // Q4_1
+        32 => (4 + 1, 4), // IQ4_NL? 忽略
+        34 => (4 + 1, 4), // Q4_K? 忽略
+        40 => (8, 1),     // I8
+        41 => (4, 1),     // I16
+        42 => (8, 1),     // I32
+        43 => (4, 1),     // I64
         // 自定义: BitNet I2_S —— llama.cpp bitnet 分支: QK=64? 这里按 bitnet.cpp 的 I2_S 布局:
         // 每 64 权重 = 16 字节 + 4 字节 scale
-        99 => (20, 64),                           // 自定义 I2_S（bitnet）占位，需按实际映射
+        99 => (20, 64), // 自定义 I2_S（bitnet）占位，需按实际映射
         _ => (0, 1),
     }
 }
